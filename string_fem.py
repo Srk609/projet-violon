@@ -80,17 +80,32 @@ def etendre_vecteur(U_free, free, n_dof):
 
 def force_ponctuelle(nodes, x_load, F0, ndof_per_node=1):
     """
-    Force ponctuelle F0 en x_load, répartie sur les deux noeuds de l'élément
-    qui le contient : F_i = F0 * N_i(x_load).
+    Vecteur force pour une force ponctuelle F0 en x_load.
+
+    Hypothèse simplificatrice : la force de l'archet est supposée appliquée
+    directement sur un noeud du maillage (cas F_i = F0, autres composantes nulles).
+    On prend le noeud le plus proche de x_load. Cette hypothèse est exacte si
+    x_load coïncide avec un noeud ; sinon, la position de la force est décalée
+    d'au plus h/2 (h = longueur d'un élément).
+
+    Entrées :
+    - nodes : positions des noeuds
+    - x_load : position de la force [m]
+    - F0 : intensité de la force [N]
+    - ndof_per_node : nombre de ddl par noeud
+
+    Sortie : vecteur F de taille n_dof, nul sauf au noeud chargé.
     """
     F = np.zeros(len(nodes) * ndof_per_node)
-    e = np.clip(np.searchsorted(nodes, x_load, side="right") - 1, 0, len(nodes) - 2)
-    h = nodes[e + 1] - nodes[e]
-    xi = (x_load - nodes[e]) / h              # coordonnée locale dans [0, 1]
-    F[e * ndof_per_node] = F0 * (1 - xi)      # N_1(x_load)
-    F[(e + 1) * ndof_per_node] = F0 * xi      # N_2(x_load)
+
+    # recherche du noeud i le plus proche de x_load
+    i = 0
+    for j in range(len(nodes)):
+        if abs(nodes[j] - x_load) < abs(nodes[i] - x_load):
+            i = j
+
+    F[i * ndof_per_node] = F0     # toute la force sur le noeud i
     return F
- 
 
 def u_exact(x, F0, T, L, x_bow):
     x = np.asarray(x)
