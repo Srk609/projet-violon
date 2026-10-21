@@ -17,30 +17,20 @@ def mesh_1d(L, n_elem):
     return nodes,connect
 
 
-def string_elem_stiffness(h, T):
+def string_elem_stiffness(h, T):# Matrice de la raideur élémentaire
     return (T / h) * np.array([
         [ 1.0, -1.0],
         [-1.0,  1.0]
     ])
-def string_elem_mass(h, rho, S):
+def string_elem_mass(h, rho, S):#Matrice de la masse élémentaire
     return rho * S * h / 6 * np.array([[2.0, 1.0],
                                        [1.0, 2.0]])
 
 
-def string_elem_mass_lumped(h, rho, S):
+def string_elem_mass_lumped(h, rho, S):#matrice de la masse "concentrée"
     return rho * S * h / 2 * np.array([[1.0, 0.0],
                                        [0.0, 1.0]])
 
-
-def string_elem_mass(h, rho, S):
-    """Masse cohérente : Me = rho*S*h/6 * [[2, 1], [1, 2]]"""
-    return rho * S * h / 6 * np.array([[2.0, 1.0],
-                                       [1.0, 2.0]])
-
-
-def string_elem_mass_lumped(h, rho, S):
-    """Masse concentrée : Me = rho*S*h/2 * [[1, 0], [0, 1]]"""
-    return rho * S * h / 2 * np.eye(2)
 
 def assemble(nodes, connect, matrice_elementaire, ndof_per_node=1, **params):
     """
@@ -51,15 +41,15 @@ def assemble(nodes, connect, matrice_elementaire, ndof_per_node=1, **params):
     """
     n_nodes = len(nodes)
     n_dof = n_nodes * ndof_per_node
-    A = np.zeros((n_dof, n_dof))
-    for elem_nodes in connect:
-        h = nodes[elem_nodes[1]] - nodes[elem_nodes[0]]
-        Ae = matrice_elementaire(h, **params)
+    A = np.zeros((n_dof, n_dof)) # Initialisation de la matrice globale vide
+    for elem_nodes in connect: #on parcourt chaque élément du maillage
+        h = nodes[elem_nodes[1]] - nodes[elem_nodes[0]] #Longueur de l'élément
+        Ae = matrice_elementaire(h, **params) # calcul de la matrice élémentaire à partir des deux fonctions définis ci-dessus
         dofs = [i * ndof_per_node + k
                 for i in elem_nodes for k in range(ndof_per_node)]
         for a in range(len(dofs)):
             for b in range(len(dofs)):
-                A[dofs[a], dofs[b]] += Ae[a, b]
+                A[dofs[a], dofs[b]] += Ae[a, b] # Addition dans la matrice globale
     return A
  
 def free_dofs(n_dof, fixed):
@@ -69,14 +59,15 @@ def free_dofs(n_dof, fixed):
 
 def reduire_matrice(A, free):
     """Matrice réduite : lignes libres, puis colonnes libres."""
-    return A[free][:, free]
+    return A[free][:, free]# Extrait la sous-matrice correspondant uniquement aux DDL libres
  
  
 def etendre_vecteur(U_free, free, n_dof):
     """Reconstruit le vecteur complet (zéros aux ddl bloqués)."""
     U = np.zeros(n_dof)
     U[free] = U_free
-    return U
+    return U # Replace les valeurs libres et met des 0 aux extrémités bloquées
+
 
 def force_ponctuelle(nodes, x_load, F0, ndof_per_node=1):
     """
@@ -118,23 +109,23 @@ def build_string(L, rhoS, T, n_elem):
     """Construit le maillage et assemble les matrices globales K et M."""
     nodes, connect = mesh_1d(L, n_elem)
     ndof_per_node = 1
-    K = assemble(nodes, connect, string_elem_stiffness, ndof_per_node, T=T)
-    M = assemble(nodes, connect, string_elem_mass, ndof_per_node, rho=rhoS, S=1.0)
+    K = assemble(nodes, connect, string_elem_stiffness, ndof_per_node, T=T) #utilisation de l'outil d'assemblage en associant la fonction de raideur élémentaire pour ensuite calculer la matrice de raideur globale K de toute la corde
+    M = assemble(nodes, connect, string_elem_mass, ndof_per_node, rho=rhoS, S=1.0)#utilisation de l'outil d'assemblage en associant la fonction de masse élémentaire pour ensuite calculer la matrice de masse globale M de toute la corde
     
     n_dof = K.shape[0]
     fixed = [0, n_dof - 1] # Extrémités encastrées
-    free = free_dofs(n_dof, fixed)
+    free = free_dofs(n_dof, fixed)# permet d'identifier les noeuds qui ont le droit de bouger(les noeuds intérieurs),en retirant les noeuds bloqués de la liste.
     return nodes, K, M, free
 def solve_modal(K, M, free, n_modes=10):
-    K_free = reduire_matrice(K, free)
+    K_free = reduire_matrice(K, free)#permet d'éliminer les lignes et colonnes correspondant aux extrémités bloquées
     M_free = reduire_matrice(M, free)
-    omega2, phi_free = linalg.eigh(K_free, M_free, subset_by_index=(0, n_modes - 1))
+    omega2, phi_free = linalg.eigh(K_free, M_free, subset_by_index=(0, n_modes - 1)) # Permet d'obtenir les n_modes premiers modes
     omega = np.sqrt(omega2)
     frequencies = omega / (2 * np.pi)
     n_dof = K.shape[0]
-    phi = np.zeros((n_dof, n_modes))
+    phi = np.zeros((n_dof, n_modes)) #création d'un tableau vide qui permettra de stocker les vecteurs propres.
     for i in range(n_modes):
-        phi[:, i] = etendre_vecteur(phi_free[:, i], free, n_dof)
+        phi[:, i] = etendre_vecteur(phi_free[:, i], free, n_dof)# on extrait la ième colonne qui correspond au ième vecteur propre réduit d'un mode,puis on lui rajoute des zéros aux extrémités bloquées puis on jecte ce vecteur complet dans la matrice phi
         
     return frequencies, phi
 L = 0.33            # longueur [m]
