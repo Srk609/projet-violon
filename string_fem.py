@@ -61,4 +61,19 @@ def assemble(nodes, connect, elem_matrix, ndof_per_node=1, **params):
                 A[dofs[a], dofs[b]] += Ae[a, b]
     return A
 
+def free_dofs(n_dof, fixed):
+    """Liste des ddl libres : tous les ddl sauf ceux bloqués."""
+    return np.setdiff1d(np.arange(n_dof), fixed)
+
+
+def reduce_matrix(A, free):
+    """Matrice réduite : lignes libres, puis colonnes libres."""
+    return A[free][:, free]
+
+
+def expand_vector(U_free, free, n_dof):
+    """Reconstruit le vecteur complet (zéros aux ddl bloqués)."""
+    U = np.zeros(n_dof)
+    U[free] = U_free
+    return U
 
