@@ -94,7 +94,7 @@ def force_ponctuelle(nodes, x_load, F0, ndof_per_node=1):
     - F0 : intensité de la force [N]
     - ndof_per_node : nombre de ddl par noeud
 
-    Sortie : vecteur F de taille n_dof, nul sauf au noeud chargé.
+    Sortie : vecteur F de taille n_dof, nul sauf au noeud chargé
     """
     F = np.zeros(len(nodes) * ndof_per_node)
 
