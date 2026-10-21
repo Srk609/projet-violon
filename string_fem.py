@@ -113,4 +113,27 @@ def u_exact(x, F0, T, L, x_bow):
                                    x * (L - x_bow),
                                    x_bow * (L - x))
 
-
+from scipy import linalg
+def build_string(L, rho, T, n_elem):
+    """Construit le maillage et assemble les matrices globales K et M."""
+    nodes, connect = mesh_1d(L, n_elem)
+    ndof_per_node = 1
+    K = assemble(nodes, connect, string_elem_stiffness, ndof_per_node,T)
+    M = assemble(nodes, connect, string_elem_mass, ndof_per_node, rho, S=1.0)
+    
+    n_dof = K.shape[0]
+    fixed = [0, n_dof - 1] 
+    free = free_dofs(n_dof, fixed)
+    return nodes, K, M, free
+def solve_modal(K, M, free, n_modes=10):
+    K_free = reduire_matrice(K, free)
+    M_free = reduire_matrice(M, free)
+    omega2, phi_free = linalg.eigh(K_free, M_free, subset_by_index=(0, n_modes - 1))
+    omega = np.sqrt(omega2)
+    frequencies = omega / (2 * np.pi)
+    n_dof = K.shape[0]
+    phi = np.zeros((n_dof, n_modes))
+    for i in range(n_modes):
+        phi[:, i] = etendre_vecteur(phi_free[:, i], free, n_dof)
+        
+    return frequencies, phi
