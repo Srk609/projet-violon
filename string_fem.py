@@ -21,3 +21,44 @@ def string_elem_stiffness(h, T):
         [ 1.0, -1.0],
         [-1.0,  1.0]
     ])
+def string_elem_mass(h, rho, S):
+    return rho * S * h / 6 * np.array([[2.0, 1.0],
+                                       [1.0, 2.0]])
+
+
+def string_elem_mass_lumped(h, rho, S):
+    return rho * S * h / 2 * np.array([[1.0, 0.0],
+                                       [0.0, 1.0]])
+
+
+def string_elem_mass(h, rho, S):
+    """Masse cohérente : Me = rho*S*h/6 * [[2, 1], [1, 2]]"""
+    return rho * S * h / 6 * np.array([[2.0, 1.0],
+                                       [1.0, 2.0]])
+
+
+def string_elem_mass_lumped(h, rho, S):
+    """Masse concentrée : Me = rho*S*h/2 * [[1, 0], [0, 1]]"""
+    return rho * S * h / 2 * np.eye(2)
+
+def assemble(nodes, connect, elem_matrix, ndof_per_node=1, **params):
+    """
+    Assemble une matrice globale à partir d'une fonction élémentaire.
+
+    elem_matrix : fonction (h, **params) -> matrice élémentaire
+    params      : paramètres passés à elem_matrix (T=..., rho=..., S=...)
+    """
+    n_nodes = len(nodes)
+    n_dof = n_nodes * ndof_per_node
+    A = np.zeros((n_dof, n_dof))
+    for elem_nodes in connect:
+        h = nodes[elem_nodes[1]] - nodes[elem_nodes[0]]
+        Ae = elem_matrix(h, **params)
+        dofs = [i * ndof_per_node + k
+                for i in elem_nodes for k in range(ndof_per_node)]
+        for a in range(len(dofs)):
+            for b in range(len(dofs)):
+                A[dofs[a], dofs[b]] += Ae[a, b]
+    return A
+
+
