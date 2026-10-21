@@ -114,15 +114,15 @@ def u_exact(x, F0, T, L, x_bow):
                                    x_bow * (L - x))
 
 from scipy import linalg
-def build_string(L, rho, T, n_elem):
+def build_string(L, rhoS, T, n_elem):
     """Construit le maillage et assemble les matrices globales K et M."""
     nodes, connect = mesh_1d(L, n_elem)
     ndof_per_node = 1
-    K = assemble(nodes, connect, string_elem_stiffness, ndof_per_node,T)
-    M = assemble(nodes, connect, string_elem_mass, ndof_per_node, rho, S=1.0)
+    K = assemble(nodes, connect, string_elem_stiffness, ndof_per_node, T=T)
+    M = assemble(nodes, connect, string_elem_mass, ndof_per_node, rho=rhoS, S=1.0)
     
     n_dof = K.shape[0]
-    fixed = [0, n_dof - 1] 
+    fixed = [0, n_dof - 1] # Extrémités encastrées
     free = free_dofs(n_dof, fixed)
     return nodes, K, M, free
 def solve_modal(K, M, free, n_modes=10):
@@ -137,3 +137,31 @@ def solve_modal(K, M, free, n_modes=10):
         phi[:, i] = etendre_vecteur(phi_free[:, i], free, n_dof)
         
     return frequencies, phi
+L = 0.33            # longueur [m]
+x_bow = 0.03        # position de l'archet [m]
+rhoS = 3.1e-3       # masse linéique [kg/m]
+f1 = 196.0          # fréquence fondamentale [Hz]
+T = rhoS * (2 * L * f1) ** 2     # tension déduite [N]
+n_elem = 330        # Maillage raffiné pour capturer proprement les 10 modes
+
+nodes, K, M, free = build_string(L, rhoS, T, n_elem)
+
+
+n_modes = 4
+frequencies, phi = solve_modal(K, M, free, n_modes=n_modes)
+
+plt.figure(figsize=(10, 6))
+
+for n in range(n_modes):
+    plt.plot(nodes, phi[:, n], label=f"mode {n+1} : {frequencies[n]:.1f} Hz")
+
+# Ajout de la ligne verticale pour la position de l'archet
+plt.axvline(x=x_bow, color='gray', linestyle=':', label='archet')
+
+plt.xlabel("Position sur la corde [m]")
+plt.ylabel("Déformée modale (normée)")
+plt.title("Premières déformées modales de la corde")
+plt.legend(loc='upper right')
+plt.grid(True, linestyle=':', alpha=0.7)
+plt.tight_layout()
+plt.show()
