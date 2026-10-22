@@ -125,7 +125,7 @@ def solve_modal(K, M, free, n_modes=10):
     n_dof = K.shape[0]
     phi = np.zeros((n_dof, n_modes)) #création d'un tableau vide qui permettra de stocker les vecteurs propres.
     for i in range(n_modes):
-        phi[:, i] = etendre_vecteur(phi_free[:, i], free, n_dof)# on extrait la ième colonne qui correspond au ième vecteur propre réduit d'un mode,puis on lui rajoute des zéros aux extrémités bloquées puis on jecte ce vecteur complet dans la matrice phi
+        phi[:, i] = etendre_vecteur(phi_free[:, i], free, n_dof)# on extrait la ième colonne qui correspond au ième vecteur propre réduit d'un mode,puis on lui rajoute des zéros aux extrémités bloquées puis on injecte ce vecteur complet dans la matrice phi
         
     return frequencies, phi
 L = 0.33            # longueur [m]
