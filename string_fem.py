@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt   
 import scipy
-
+import time
 def mesh_1d(L, n_elem):
     """
     Entrées :
@@ -189,4 +189,30 @@ ax.set_title("Évolution de la corde en fonctionb de x pour differents instants"
 ax.legend()
 ax.grid()
 plt.show()
+N=10
+frequencies,phi=solve_modal(K,M,free,n_modes=10)
+q0=phi.T@(M_libre@U0_initial)
+q_point0=np.zeros(N)
+Y0_modal = np.concatenate((q0, q_point0))
+def second_membre_modal(t,y):
+    q=y[:10]
+    q_point=y[10:]
+    acceleration_modal=((-2)*np.pi*frequencies)**2*q
+    return np.concatenate((q_point,acceleration_modal))
+debut = time.perf_counter()
+solution_modal = scipy.integrate.solve_ivp( second_membre_modal,t_span,Y0, method="RK45",t_eval=t_eval,rtol=1e-3,atol=1e-6)
+q_t = solution_modal.y[:N, :]
+temps_calcul = time.perf_counter() - debut
+print("Temps de calcul :", temps_calcul, "s")
+# U(t) approxime = Phi @ q(t)
+U_modal = phi @ q_t
+fig, ax = plt.subplots()
+for i in range(0, 1000, 100):
+    ax.plot(nodes, U_modal[:, i], label=f"t = {solution_modal.t[i]:.4f} s")
 
+ax.set_xlabel("Position x (m)")
+ax.set_ylabel("Déplacement u_modal(x,t) (m)")
+ax.set_title("Évolution de la corde en fonctionb de x pour differents instants")
+ax.legend()
+ax.grid()
+plt.show()
