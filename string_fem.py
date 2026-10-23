@@ -180,7 +180,7 @@ U_libre_t = solution.y[:n_libres, :]
 #Reconstruction des déplacements sur tous les noeuds
 U_t = np.zeros((len(nodes), len(solution.t)))
 U_t[free, :] = U_libre_t
-
+jj
 
 
 
