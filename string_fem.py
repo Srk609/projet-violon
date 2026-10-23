@@ -142,7 +142,7 @@ nodes, K, M, free = build_string(L, rhoS, T, n_elem)
 n_modes = 4
 frequencies, phi = solve_modal(K, M, free, n_modes=n_modes)
 
-n_elem = 110
+n_elem = 330
 x_pluck = 0.03          # Position du pincement [m]
 u_pluck = 1e-3          # Déplacement au point de pincement [m]
 duree = 0.2             # Durée simulée [s]
@@ -153,7 +153,6 @@ K_libre = reduire_matrice(K, free)
 M_libre = reduire_matrice(M, free)
 
 n_libres = len(free)
-
 #construction du vecteur initial avec le déplacement et la vitesse
 U0_initial=u_exact(nodes,1.0,T,L,x_pluck)
 # Conservation des seuls degrés de liberté libres
@@ -165,12 +164,12 @@ V0=np.zeros(n_libres)
 Y0=np.concatenate((U0,V0))
 facteur_M = scipy.linalg.cho_factor(M_libre)
 def second_membre(t,Y):
-    U=Y[n_libres:]
-    V=Y[:n_libres]
+    U = Y[:n_libres]
+    V = Y[n_libres:]
     acceleration = scipy.linalg.cho_solve(facteur_M, -K_libre @ U)
     return np.concatenate((V, acceleration))
 t_span=(0.0,duree)
-t_eval = np.linspace(*t_span)
+t_eval = np.linspace(t_span[0], t_span[1], 1000)
 
 solution = scipy.integrate.solve_ivp( second_membre,t_span,Y0, method="RK45",t_eval=t_eval,rtol=1e-3,atol=1e-6)
 
@@ -180,7 +179,14 @@ U_libre_t = solution.y[:n_libres, :]
 #Reconstruction des déplacements sur tous les noeuds
 U_t = np.zeros((len(nodes), len(solution.t)))
 U_t[free, :] = U_libre_t
-jj
+fig, ax = plt.subplots()
+for i in range(0, 1000, 100):
+    ax.plot(nodes, U_t[:, i], label=f"t = {solution.t[i]:.4f} s")
 
-
+ax.set_xlabel("Position x (m)")
+ax.set_ylabel("Déplacement u(x,t) (m)")
+ax.set_title("Évolution de la corde en fonctionb de x pour differents instants")
+ax.legend()
+ax.grid()
+plt.show()
 
