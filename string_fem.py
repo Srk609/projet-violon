@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt   
+import scipy
 
 def mesh_1d(L, n_elem):
     """
@@ -141,18 +142,45 @@ nodes, K, M, free = build_string(L, rhoS, T, n_elem)
 n_modes = 4
 frequencies, phi = solve_modal(K, M, free, n_modes=n_modes)
 
-plt.figure(figsize=(10, 6))
+n_elem = 110
+x_pluck = 0.03          # Position du pincement [m]
+u_pluck = 1e-3          # Déplacement au point de pincement [m]
+duree = 0.2             # Durée simulée [s]
+fs=44100                #Fréquence [Hz]
+nodes, K, M, free = build_string(L, rhoS, T, n_elem)
 
-for n in range(n_modes):
-    plt.plot(nodes, phi[:, n], label=f"mode {n+1} : {frequencies[n]:.1f} Hz")
+K_libre = reduire_matrice(K, free)
+M_libre = reduire_matrice(M, free)
 
-# Ajout de la ligne verticale pour la position de l'archet
-plt.axvline(x=x_bow, color='gray', linestyle=':', label='archet')
+n_libres = len(free)
 
-plt.xlabel("Position sur la corde [m]")
-plt.ylabel("Déformée modale (normée)")
-plt.title("Premières déformées modales de la corde")
-plt.legend(loc='upper right')
-plt.grid(True, linestyle=':', alpha=0.7)
-plt.tight_layout()
-plt.show()
+#construction du vecteur initial avec le déplacement et la vitesse
+U0_initial=u_exact(nodes,1.0,T,L,x_pluck)
+# Conservation des seuls degrés de liberté libres
+U0 = U0_initial[free]
+
+#la vitesse initiale est supposée nulle
+V0=np.zeros(n_libres)
+
+Y0=np.concatenate((U0,V0))
+facteur_M = scipy.linalg.cho_factor(M_libre)
+def second_membre(t,Y):
+    U=Y[n_libres:]
+    V=Y[:n_libres]
+    acceleration = scipy.linalg.cho_solve(facteur_M, -K_libre @ U)
+    return np.concatenate((V, acceleration))
+t_span=(0.0,duree)
+t_eval = np.linspace(*t_span)
+
+solution = scipy.integrate.solve_ivp( second_membre,t_span,Y0, method="RK45",t_eval=t_eval,rtol=1e-3,atol=1e-6)
+
+#On récupère le déplacement en fonction du temps 
+U_libre_t = solution.y[:n_libres, :]
+
+#Reconstruction des déplacements sur tous les noeuds
+U_t = np.zeros((len(nodes), len(solution.t)))
+U_t[free, :] = U_libre_t
+
+
+
+
