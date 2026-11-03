@@ -191,3 +191,4 @@ ax.set_title("Évolution de la corde en fonctionb de x pour differents instants"
 ax.legend()
 ax.grid()
 plt.show()
+jj
