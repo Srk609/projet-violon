@@ -145,9 +145,12 @@ frequencies, phi = solve_modal(K, M, free, n_modes=n_modes)
 n_elem = 330
 x_pluck = 0.03          # Position du pincement [m]
 u_pluck = 1e-3          # Déplacement au point de pincement [m]
-duree = 0.2             # Durée simulée [s]
+duree = 0.1             # Durée simulée [s]
 fs=44100                #Fréquence [Hz]
 nodes, K, M, free = build_string(L, rhoS, T, n_elem)
+t_span=(0.0,duree)
+t_eval = np.linspace(t_span[0], t_span[1], 1000)
+
 
 K_libre = reduire_matrice(K, free)
 M_libre = reduire_matrice(M, free)
@@ -158,57 +161,29 @@ U0_initial=u_exact(nodes,1.0,T,L,x_pluck)
 # Conservation des seuls degrés de liberté libres
 U0 = U0_initial[free]
 
-#la vitesse initiale est supposée nulle
-V0=np.zeros(n_libres)
-
-Y0=np.concatenate((U0,V0))
-facteur_M = scipy.linalg.cho_factor(M_libre)
-def second_membre(t,Y):
-    U = Y[:n_libres]
-    V = Y[n_libres:]
-    acceleration = scipy.linalg.cho_solve(facteur_M, -K_libre @ U)
-    return np.concatenate((V, acceleration))
-t_span=(0.0,duree)
-t_eval = np.linspace(t_span[0], t_span[1], 1000)
-
-solution = scipy.integrate.solve_ivp( second_membre,t_span,Y0, method="RK45",t_eval=t_eval,rtol=1e-3,atol=1e-6)
-
-#On récupère le déplacement en fonction du temps 
-U_libre_t = solution.y[:n_libres, :]
-
-#Reconstruction des déplacements sur tous les noeuds
-U_t = np.zeros((len(nodes), len(solution.t)))
-U_t[free, :] = U_libre_t
-fig, ax = plt.subplots()
-for i in range(0, 1000, 100):
-    ax.plot(nodes, U_t[:, i], label=f"t = {solution.t[i]:.4f} s")
-
-ax.set_xlabel("Position x (m)")
-ax.set_ylabel("Déplacement u(x,t) (m)")
-ax.set_title("Évolution de la corde en fonctionb de x pour differents instants")
-ax.legend()
-ax.grid()
-plt.show()
 N=10
 frequencies,phi=solve_modal(K,M,free,n_modes=10)
-q0=phi.T@(M_libre@U0_initial)
+phi_libre = phi[free, :]
+q0=phi_libre.T@(M_libre@U0)
 q_point0=np.zeros(N)
 Y0_modal = np.concatenate((q0, q_point0))
 def second_membre_modal(t,y):
     q=y[:10]
     q_point=y[10:]
-    acceleration_modal=((-2)*np.pi*frequencies)**2*q
+    acceleration_modal=-(2*np.pi*frequencies)**2*q
     return np.concatenate((q_point,acceleration_modal))
-debut = time.perf_counter()
-solution_modal = scipy.integrate.solve_ivp( second_membre_modal,t_span,Y0, method="RK45",t_eval=t_eval,rtol=1e-3,atol=1e-6)
+solution_modal = scipy.integrate.solve_ivp( second_membre_modal,t_span,Y0_modal, method="DOP853",t_eval=t_eval,rtol=1e-6,atol=1e-9)
 q_t = solution_modal.y[:N, :]
-temps_calcul = time.perf_counter() - debut
-print("Temps de calcul :", temps_calcul, "s")
+
+T1 = 1 / f1
+demi_periode = T1 / 2
 # U(t) approxime = Phi @ q(t)
 U_modal = phi @ q_t
 fig, ax = plt.subplots()
-for i in range(0, 1000, 100):
-    ax.plot(nodes, U_modal[:, i], label=f"t = {solution_modal.t[i]:.4f} s")
+
+for i in [0, int(0.125*T1*fs), int(0.25*T1*fs),
+          int(0.375*T1*fs), int(0.5*T1*fs)]:
+    ax.plot(nodes, U_modal[:, i], label=f"t = {solution_modal.t[i]:.5f} s")
 
 ax.set_xlabel("Position x (m)")
 ax.set_ylabel("Déplacement u_modal(x,t) (m)")
