@@ -160,35 +160,41 @@ n_libres = len(free)
 U0_initial=u_exact(nodes,1.0,T,L,x_pluck)
 # Conservation des seuls degrés de liberté libres
 U0 = U0_initial[free]
-
+xi = 0.001
 N=10
 frequencies,phi=solve_modal(K,M,free,n_modes=10)
 phi_libre = phi[free, :]
 q0=phi_libre.T@(M_libre@U0)
 q_point0=np.zeros(N)
 Y0_modal = np.concatenate((q0, q_point0))
-def second_membre_modal(t,y):
+
+def second_membre_non_amorti(t,y):
+    q = y[:N]
+    q_point = y[N:]
+    acceleration = -(2*np.pi*frequencies)**2 * q
+    return np.concatenate((q_point, acceleration))
+
+def second_membre_amorti(t,y):
     q=y[:10]
     q_point=y[10:]
-    acceleration_modal=-(2*np.pi*frequencies)**2*q
-    return np.concatenate((q_point,acceleration_modal))
-solution_modal = scipy.integrate.solve_ivp( second_membre_modal,t_span,Y0_modal, method="DOP853",t_eval=t_eval,rtol=1e-6,atol=1e-9)
-q_t = solution_modal.y[:N, :]
+    acceleration_amorti = -2*xi*2*np.pi*frequencies*q_point - (2*np.pi*frequencies)**2*q
+    return np.concatenate((q_point,acceleration_amorti))
 
-T1 = 1 / f1
-demi_periode = T1 / 2
-# U(t) approxime = Phi @ q(t)
-U_modal = phi @ q_t
-fig, ax = plt.subplots()
+solution_amortie = scipy.integrate.solve_ivp(
+    second_membre_amorti,
+    (0, duree),
+    Y0_modal,
+    method="DOP853",
+    t_eval=t_eval,
+    rtol=1e-6,
+    atol=1e-9)
 
-for i in [0, int(0.125*T1*fs), int(0.25*T1*fs),
-          int(0.375*T1*fs), int(0.5*T1*fs)]:
-    ax.plot(nodes, U_modal[:, i], label=f"t = {solution_modal.t[i]:.5f} s")
+solution_non_amortie=scipy.integrate.solve_ivp(
+    second_membre_non_amorti,                  
+    (0, duree),                                         
+    Y0_modal,                                           
+    method="DOP853",                                    
+    t_eval=t_eval,                                      
+    rtol=1e-6,                                          
+    atol=1e-9)
 
-ax.set_xlabel("Position x (m)")
-ax.set_ylabel("Déplacement u_modal(x,t) (m)")
-ax.set_title("Évolution de la corde en fonctionb de x pour differents instants")
-ax.legend()
-ax.grid()
-plt.show()
-jj
