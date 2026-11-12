@@ -223,3 +223,16 @@ U_seconde_avec = phi @ q_seconde_avec # Accélération avec amortissement
 force_sans = -(K @ U_sans + M @ U_seconde_sans)[0,:]
 force_avec = -(K @ U_avec + M @ U_seconde_avec)[0,:]
 
+
+from scipy.io import wavfile # Importation de la fonction d'écriture audio
+# Récupération de la force au chevalet avec amortissement
+signal = force_avec.copy()
+
+# Normalisation du signal
+amplitude = np.iinfo(np.int16).max #récupérer la valeur maximale que peut contenir un entier signé codé sur 16 bits.
+signal = signal / np.max(np.abs(signal))#ramener les valeurs du signal entre -1 et 1.
+data = amplitude * signal #notre signal est compris entre -1 et 1, alors que le format entier 16 bits utilise des valeurs comprises entre -32768 et 32767.On met les valeurs du signal selon la nouvelle plage
+
+wavfile.write("pincement1.wav", fs, data.astype(np.int16))
+
+
