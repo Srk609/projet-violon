@@ -235,4 +235,17 @@ data = amplitude * signal #notre signal est compris entre -1 et 1, alors que le 
 
 wavfile.write("pincement1.wav", fs, data.astype(np.int16))
 
+# Comparaison graphique des forces au chevalet
+plt.figure(figsize=(12, 7)) # Création de la figure
+
+# Graphique sur toute la durée
+plt.subplot(2, 2, (1, 2))
+plt.plot(t_eval, force_sans, label="sans amortissement")
+plt.plot(t_eval, force_avec, label="xi = 0.1% pour tous les modes")
+plt.xlabel("t [s]")
+plt.ylabel("Force au chevalet [N]")
+plt.legend()
+plt.grid()
+plt.show()
+
 
