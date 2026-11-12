@@ -145,11 +145,11 @@ frequencies, phi = solve_modal(K, M, free, n_modes=n_modes)
 n_elem = 330
 x_pluck = 0.03          # Position du pincement [m]
 u_pluck = 1e-3          # Déplacement au point de pincement [m]
-duree = 0.1             # Durée simulée [s]
+duree = 1.0             # Durée simulée [s]
 fs=44100                #Fréquence [Hz]
 nodes, K, M, free = build_string(L, rhoS, T, n_elem)
 t_span=(0.0,duree)
-t_eval = np.linspace(t_span[0], t_span[1], 1000)
+t_eval = np.arange(0, duree, 1/fs)
 
 
 K_libre = reduire_matrice(K, free)
@@ -161,6 +161,7 @@ U0_initial=u_exact(nodes,1.0,T,L,x_pluck)
 # Conservation des seuls degrés de liberté libres
 U0 = U0_initial[free]
 xi = 0.001
+
 N=10
 frequencies,phi=solve_modal(K,M,free,n_modes=10)
 phi_libre = phi[free, :]
@@ -197,4 +198,28 @@ solution_non_amortie=scipy.integrate.solve_ivp(
     t_eval=t_eval,                                      
     rtol=1e-6,                                          
     atol=1e-9)
+
+# Récupération des déplacements 
+q_sans_amortissement = solution_non_amortie.y[:N, :]
+q_avec_amortissement = solution_amortie.y[:N, :]
+
+# Récupération des vitesses 
+q_point_sans_amortissement = solution_non_amortie.y[N:, :]
+q_point_avec_amortissement = solution_amortie.y[N:, :] 
+
+# Calcul des accélérations 
+q_seconde_sans = -(2*np.pi*frequencies.reshape(N, 1))**2 * q_sans_amortissement # on utilise reshape(N,1) pour transformer le tableau de fréquences en un tableau de dimension(N,1) pour ensuite utiliser le broadcasting pour réaliser la multiplication
+q_seconde_avec = (-2*xi*2*np.pi*frequencies.reshape(N, 1)*q_point_avec_amortissement 
+               -(2*np.pi*frequencies.reshape(N, 1))**2*q_avec_amortissement)       
+# Reconstruction des déplacements 
+U_sans = phi @ q_sans_amortissement   # Déplacement sans amortissement
+U_avec = phi @ q_avec_amortissement   # Déplacement avec amortissement
+
+# Reconstruction des accélérations physiques
+U_seconde_sans = phi @ q_seconde_sans # Accélération sans amortissement
+U_seconde_avec = phi @ q_seconde_avec # Accélération avec amortissement
+
+# Calcul des forces au chevalet qui est àl'origine 
+force_sans = -(K @ U_sans + M @ U_seconde_sans)[0,:]
+force_avec = -(K @ U_avec + M @ U_seconde_avec)[0,:]
 
