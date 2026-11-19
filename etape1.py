@@ -2,14 +2,14 @@ import numpy as np
 import matplotlib.pyplot as plt   
 import scipy
 import time
-from string_fem import mesh_1d,string_elem_stiffness,string_elem_mass_lumped,string_elem_mass,reduire_matrice,etendre_vecteur,force_ponctuelle,assemble,free_dofs,u_exact
+from string_fem import mesh_1d,string_elem_stiffness,string_elem_mass_lumped,string_elem_mass,reduire_matrice,etendre_vecteur,force_ponctuelle,assemble,free_dofs,u_exact,build_string,solve_modal
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 # Données
-L, x_bow, rho_S, f1, F0 = 0.33, 0.03, 3.1e-3, 196, 1.0
-T = rho_S * (2 * L * f1)**2          # ≈ 51.9 N
+L, x_bow, rhoS, f1, F0 = 0.33, 0.03, 3.1e-3, 196, 1.0
+T = rhoS * (2 * L * f1)**2          # ≈ 51.9 N
 n_elem = 11
 
 # Maillage et raideur
@@ -38,4 +38,26 @@ plt.xlabel("x [m]")
 plt.ylabel("u [mm]")
 plt.title(f"Déformée statique sous F = {F0} N en x = {x_bow} m (T = {T:.1f} N)")
 plt.legend()
+plt.show()
+
+n_elem = 330        # Maillage raffiné pour capturer proprement les 10 modes
+
+nodes, K, M, free = build_string(L, rhoS, T, n_elem)
+
+n_modes = 10
+frequencies, phi = solve_modal(K, M, free, n_modes=n_modes)
+
+plt.figure(figsize=(10, 6))
+
+for n in range(n_modes):
+    plt.plot(nodes, phi[:, n], label=f"mode {n+1} : {frequencies[n]:.1f} Hz")
+
+# Ajout de la ligne verticale pour la position de l'archet
+plt.axvline(x=x_bow, color='gray', linestyle=':', label='archet')
+
+plt.xlabel("Position sur la corde [m]")
+plt.ylabel("Déformée modale (normée)")
+plt.title("Premières déformées modales de la corde")
+plt.legend(loc='upper right')
+plt.grid(True, linestyle=':', alpha=0.7)
 plt.show()
