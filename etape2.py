@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import scipy.linalg
 import scipy.integrate
 from scipy.io import wavfile
+from scipy import signal as sig                           # module de traitement du signal de SciPy (renommé sig car "signal" est déjà utilisé pour le .wav)
 
 from string_fem import (
     build_string,
@@ -247,41 +248,42 @@ signal = force_avec / np.max(np.abs(force_avec))
 data = np.iinfo(np.int16).max * signal
 wavfile.write("pincement1.wav", fs, data.astype(np.int16))
 
-# Figure complète : signal complet + zooms début et fin
-plt.figure(figsize=(12, 7))
-
-plt.subplot(2, 2, (1, 2))
+# Figure 1 : signal complet
+plt.figure(figsize=(10, 4))
 plt.plot(t_eval, force_sans, label="sans amortissement")
 plt.plot(t_eval, force_avec, label="xi = 0.1% pour tous les modes")
 plt.xlabel("t [s]")
 plt.ylabel("Force au chevalet [N]")
 plt.legend()
 plt.grid()
+plt.tight_layout()
+plt.show()
 
+# Figure 2 : zoom sur les premiers instants
 masque_debut = t_eval <= 0.015
-plt.subplot(2, 2, 3)
+plt.figure(figsize=(8, 4))
 plt.plot(t_eval[masque_debut], force_sans[masque_debut], color="lightgray", label="sans amortissement")
 plt.plot(t_eval[masque_debut], force_avec[masque_debut], color="C1", label="avec amortissement")
 plt.title("premiers instants")
 plt.xlabel("t [s]")
 plt.ylabel("force au chevalet [N]")
 plt.grid()
+plt.tight_layout()
+plt.show()
 
+# Figure 3 : zoom sur les derniers instants
 masque_fin = t_eval >= (duree_sim - 0.015)
-plt.subplot(2, 2, 4)
+plt.figure(figsize=(8, 4))
 plt.plot(t_eval[masque_fin], force_sans[masque_fin], color="lightgray", label="sans amortissement")
 plt.plot(t_eval[masque_fin], force_avec[masque_fin], color="C1", label="avec amortissement")
 plt.title("derniers instants")
 plt.xlabel("t [s]")
 plt.ylabel("force au chevalet [N]")
 plt.grid()
-
 plt.tight_layout()
 plt.show()
 
 # Calcul des spectres
-f, A_sans = spectre(force_sans, fs)
-f, A_avec = spectre(force_avec, fs)
 f, A_sans = spectre(force_sans, fs)                       # spectre de la force au chevalet sans amortissement
 f, A_avec = spectre(force_avec, fs)                       # spectre de la force au chevalet avec amortissement (même axe f car même nombre de points)
 
@@ -308,8 +310,6 @@ plt.tight_layout()                                        # ajuste les marges po
 plt.show()                                                # affiche la figure
 
 # Spectrogramme de la force au chevalet amortie
-
-from scipy import signal as sig                           # module de traitement du signal de SciPy (renommé sig car "signal" est déjà utilisé pour le .wav)
 
 n_fenetre = 4096                                          # nombre de points de chaque tranche (puissance de 2 : FFT rapide)
 duree_fenetre = n_fenetre / fs                            # durée d'une tranche en secondes : 4096 / 44100 = 93 ms
