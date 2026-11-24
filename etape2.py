@@ -282,3 +282,60 @@ plt.show()
 # Calcul des spectres
 f, A_sans = spectre(force_sans, fs)
 f, A_avec = spectre(force_avec, fs)
+f, A_sans = spectre(force_sans, fs)                       # spectre de la force au chevalet sans amortissement
+f, A_avec = spectre(force_avec, fs)                       # spectre de la force au chevalet avec amortissement (même axe f car même nombre de points)
+
+A_ref = np.max(A_sans)                                    # amplitude de référence : le plus grand pic sans amortissement (il sera à 0 dB)
+dB_sans = 20 * np.log10(A_sans / A_ref + 1e-12)           # passage en décibels : 20*log10 car c'est une amplitude ; +1e-12 évite log10(0)
+dB_avec = 20 * np.log10(A_avec / A_ref + 1e-12)           # même chose avec amortissement, même référence pour pouvoir comparer
+
+df = f[1] - f[0]                                          # résolution fréquentielle = écart entre deux cases = 1/durée
+print("Résolution fréquentielle df =", df, "Hz")          # 1 Hz pour une durée de 1 s
+print("Fréquence maximale représentée =", f[-1], "Hz")    # fréquence de Nyquist fs/2 = 22050 Hz
+
+fig, ax = plt.subplots(figsize=(10, 4))                   # figure large avec un seul graphique
+for n in range(1, int(f_max / f1) + 1):                   # boucle sur les harmoniques n = 1, 2, ... tant que n*f1 <= 4000 Hz
+    ax.axvline(n * f1, color="grey", linestyle=":", linewidth=0.8)   # trait vertical en pointillés à la fréquence n*f1
+ax.plot(f, dB_sans, linewidth=0.8, label="sans amortissement")       # spectre sans amortissement
+ax.plot(f, dB_avec, linewidth=0.8, label="avec amortissement")       # spectre avec amortissement
+ax.set_xlim(0, f_max)                                     # on n'affiche que de 0 à 4 kHz
+ax.set_ylim(-100, 5)                                      # axe vertical entre -100 dB et +5 dB
+ax.set_xlabel("fréquence [Hz]")                           # titre de l'axe horizontal
+ax.set_ylabel("amplitude [dB]")                           # titre de l'axe vertical
+ax.set_title(r"spectre de la force au chevalet (pointillés : $nf_1$)")   # titre ($nf_1$ écrit en LaTeX)
+ax.legend()                                               # légende
+plt.tight_layout()                                        # ajuste les marges pour que rien ne soit coupé
+plt.show()                                                # affiche la figure
+
+# Spectrogramme de la force au chevalet amortie
+
+from scipy import signal as sig                           # module de traitement du signal de SciPy (renommé sig car "signal" est déjà utilisé pour le .wav)
+
+n_fenetre = 4096                                          # nombre de points de chaque tranche (puissance de 2 : FFT rapide)
+duree_fenetre = n_fenetre / fs                            # durée d'une tranche en secondes : 4096 / 44100 = 93 ms
+n_recouvrement = 3 * n_fenetre // 4                       # deux tranches successives se recouvrent de 75 % (la fenêtre avance de 1024 points = 23 ms)
+
+f_spec, t_spec, Sxx = sig.spectrogram(                    # calcul du spectrogramme (transformée de Fourier à court terme) :
+    force_avec,                                           #   signal analysé : force au chevalet avec amortissement
+    fs=fs,                                                #   fréquence d'échantillonnage [Hz] pour graduer l'axe des fréquences
+    window="hann",                                        #   chaque tranche est pondérée par une fenêtre de Hann (limite la fuite spectrale)
+    nperseg=n_fenetre,                                    #   longueur de chaque tranche
+    noverlap=n_recouvrement,                              #   nombre de points communs entre deux tranches voisines
+    detrend=False,                                        #   on ne retire rien au signal dans chaque tranche
+    mode="magnitude")                                     #   on veut l'amplitude |X| (et non la puissance |X|^2)
+# f_spec : fréquences (lignes), t_spec : instants au centre de chaque tranche (colonnes), Sxx : amplitude pour chaque (f, t)
+
+Sxx_dB = 20 * np.log10(Sxx / np.max(Sxx) + 1e-12)         # passage en dB, 0 dB = point le plus intense ; +1e-12 évite log10(0)
+
+fig, ax = plt.subplots(figsize=(10, 4))                   # création d'une figure large avec un seul graphique
+carte = ax.pcolormesh(t_spec, f_spec, Sxx_dB,             # carte temps-fréquence : la couleur de chaque case donne l'amplitude en dB
+                      cmap="magma",                       #   palette de couleurs (noir = faible, jaune clair = fort)
+                      vmin=-80, vmax=0,                   #   échelle des couleurs de -80 dB à 0 dB (en dessous de -80 dB : noir)
+                      shading="auto")                     #   placement automatique des cases autour des points (t, f)
+ax.set_ylim(0, 4000)                                      # on n'affiche que les fréquences de 0 à 4 kHz
+ax.set_xlabel("t [s]")                                    # titre de l'axe horizontal
+ax.set_ylabel("fréquence [Hz]")                           # titre de l'axe vertical
+ax.set_title(f"spectrogramme de la force au chevalet (amortie), fenêtre de {duree_fenetre*1e3:.0f} ms")   # titre avec la durée de la fenêtre en ms
+fig.colorbar(carte, ax=ax, label="amplitude [dB]")        # barre de couleurs à droite pour lire les dB
+plt.tight_layout()                                        # ajuste les marges pour que rien ne soit coupé
+plt.show()                                                # affiche la figure
