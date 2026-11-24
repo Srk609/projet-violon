@@ -1,86 +1,68 @@
-
-import time
 import numpy as np
 import matplotlib.pyplot as plt
-import scipy.linalg
-import scipy.integrate
-
-from string_fem import build_string, reduire_matrice, u_exact
-
-L = 0.33
-x_bow = 0.03
-rhoS = 3.1e-3
-f1 = 196.0
-T = rhoS * (2 * L * f1) ** 2
-
-n_elem = 110
-x_pluck = 0.03
-u_pluck = 1e-3
-duree = 0.2
-fs = 44100
-
-nodes, K, M, free = build_string(L, rhoS, T, n_elem)
-
-t_span = (0.0, duree)
-t_eval = np.linspace(0, duree, int(duree * fs) + 1)
-
-K_libre = reduire_matrice(K, free)
-M_libre = reduire_matrice(M, free)
-
-n_libres = len(free)
-
-# Conditions initiales
-U0_initial = u_exact(nodes, 1.0, T, L, x_pluck)
-U0 = U0_initial[free]
-
-V0 = np.zeros(n_libres)
-Y0 = np.concatenate((U0, V0))
-
-# Factorisation de la matrice de masse
-facteur_M = scipy.linalg.cho_factor(M_libre)
-
-# Second membre du système
-def second_membre(t, Y):
-    U = Y[:n_libres]
-    V = Y[n_libres:]
-    acceleration = scipy.linalg.cho_solve(
-        facteur_M, -K_libre @ U
-    )
-    return np.concatenate((V, acceleration))
-
-# Début du chronométrage
-debut = time.perf_counter()
-
-# Résolution temporelle avec RK45
-solution = scipy.integrate.solve_ivp(
-    second_membre,
-    t_span,
-    Y0,
-    method="RK45",
-    t_eval=t_eval,
-    rtol=1e-3,
-    atol=1e-6
+from string_fem import (
+    mesh_1d,
+    string_elem_stiffness,
+    assemble,
+    free_dofs,
+    reduire_matrice,
+    etendre_vecteur,
+    force_ponctuelle,
+    u_exact,
+    build_string,
+    solve_modal,
 )
 
-# Fin du chronométrage
-fin = time.perf_counter()
+# 1. Motif creux de la matrice de raideur globale K
+L, x_bow, rho_S, f1, F0 = 0.33, 0.03, 3.1e-3, 196.0, 1.0  # paramètres physiques de la corde
+T = rho_S * (2 * L * f1) ** 2  # tension déduite de la corde [N]
+n_elem = 11  # maillage grossier à 11 éléments
 
-temps_calcul = fin - debut
+nodes, connect = mesh_1d(L, n_elem)  # création des nœuds et de la connectivité
+K = assemble(nodes, connect, string_elem_stiffness, T=T)  # assemblage de la matrice de raideur
 
-print(f"Temps de calcul RK45 : {temps_calcul:.6f} secondes")
+plt.figure()
+plt.spy(K, marker="s", markersize=14)  # affichage des termes non nuls de K
+plt.title(f"corde : {K.shape[0]} ddl, nnz = {np.count_nonzero(K)}")  # titre avec ddl et nnz
+plt.show()
 
-# Reconstruction du déplacement sur tous les nœuds
-U_libre_t = solution.y[:n_libres, :]
+# 2. Déformée statique : comparaison éléments finis / solution exacte
+n_dof = len(nodes)  # nombre total de degrés de liberté
+free = free_dofs(n_dof, [0, n_dof - 1])  # ddl libres (extrémités encastrées bloquées)
 
-U_t = np.zeros((len(nodes), len(solution.t)))
-U_t[free, :] = U_libre_t
+F = force_ponctuelle(nodes, x_bow, F0)  # vecteur force ponctuelle en x_bow
+K_red = reduire_matrice(K, free)  # réduction de K aux ddl libres
+U_free = np.linalg.solve(K_red, F[free])  # résolution du système statique
+U = etendre_vecteur(U_free, free, n_dof)  # reconstruction sur tous les nœuds
 
-# Affichage du déplacement au nœud choisi
-i = 10
+x_fin = np.linspace(0, L, 500)  # grille fine pour la courbe exacte
+u_ex = u_exact(x_fin, F0, T, L, x_bow)  # solution analytique exacte
 
-plt.plot(solution.t * 1e3, U_t[i] * 1e3)
-plt.xlabel("Temps [ms]")
-plt.ylabel("Déplacement [mm]")
-plt.title("Déplacement en x = 30 mm")
-plt.grid()
+plt.figure()
+plt.plot(x_fin, u_ex * 1e3, "k", label="exact")  # tracé exact en mm
+plt.plot(nodes, U * 1e3, "o--", label=f"EF, {n_elem} éléments")  # tracé éléments finis en mm
+plt.xlabel("x [m]")  # abscisse en mètres
+plt.ylabel("u [mm]")  # déplacement en millimètres
+plt.title(f"Déformée statique sous F = {F0} N en x = {x_bow} m (T = {T:.1f} N)")  # titre de la figure
+plt.legend()
+plt.show()
+
+# 3. Premières déformées modales de la corde
+n_elem_mod = 330  # maillage raffiné pour capturer les modes
+n_modes = 10  # nombre de modes propres à tracer
+
+nodes_mod, K_mod, M_mod, free_mod = build_string(L, rho_S, T, n_elem_mod)  # construction K et M
+frequencies, phi = solve_modal(K_mod, M_mod, free_mod, n_modes=n_modes)  # fréquences et modes
+
+plt.figure(figsize=(10, 6))
+for m in range(n_modes):
+    plt.plot(nodes_mod, phi[:, m], label=f"mode {m + 1} : {frequencies[m]:.1f} Hz")  # déformée du mode m+1
+
+plt.axvline(x_bow, color="k", linestyle=":", label="archet")  # repère vertical de la position d'archet
+plt.xlabel("Position sur la corde [m]")  # axe des positions
+plt.ylabel("Déformée modale (normée)")  # axe des déformées modales
+plt.title("Premières déformées modales de la corde")  # titre de la figure
+plt.legend(loc="upper right")
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
 plt.show()
