@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt   
 import scipy
 import time
+from scipy.io import wavfile
 def mesh_1d(L, n_elem):
     """
     Entrées :
@@ -52,7 +53,15 @@ def assemble(nodes, connect, matrice_elementaire, ndof_per_node=1, **params):
             for b in range(len(dofs)):
                 A[dofs[a], dofs[b]] += Ae[a, b] # Addition dans la matrice globale
     return A
- 
+L, n_elem, T = 0.33, 11, 50.0
+
+nodes, connect = mesh_1d(L, n_elem)
+
+K = assemble(nodes, connect, string_elem_stiffness, T=T)
+
+plt.spy(K, marker="s", markersize=14)      # un carré par coefficient non nul
+plt.title(f"corde : {K.shape[0]} ddl, nnz = {np.count_nonzero(K)}")
+plt.show()
 def free_dofs(n_dof, fixed):
     """Liste des ddl libres : tous les ddl sauf ceux bloqués."""
     return np.setdiff1d(np.arange(n_dof), fixed)
@@ -143,7 +152,7 @@ n_modes = 4
 frequencies, phi = solve_modal(K, M, free, n_modes=n_modes)
 
 n_elem = 330
-x_pluck = 0.03          # Position du pincement [m]
+x_pluck = L/5          # Position du pincement [m]
 u_pluck = 1e-3          # Déplacement au point de pincement [m]
 duree = 1.0             # Durée simulée [s]
 fs=44100                #Fréquence [Hz]
@@ -156,14 +165,13 @@ K_libre = reduire_matrice(K, free)
 M_libre = reduire_matrice(M, free)
 
 n_libres = len(free)
-#construction du vecteur initial avec le déplacement et la vitesse
-U0_initial=u_exact(nodes,1.0,T,L,x_pluck)
-# Conservation des seuls degrés de liberté libres
-U0 = U0_initial[free]
+# Condition initiale
+F0 = u_pluck * T * L / (x_pluck * (L - x_pluck))
+U0 = u_exact(nodes, F0, T, L, x_pluck)[free]
 xi = 0.001
 
-N=10
-frequencies,phi=solve_modal(K,M,free,n_modes=10)
+N=25
+frequencies,phi=solve_modal(K,M,free,n_modes=N)
 phi_libre = phi[free, :]
 q0=phi_libre.T@(M_libre@U0)
 q_point0=np.zeros(N)
@@ -176,8 +184,8 @@ def second_membre_non_amorti(t,y):
     return np.concatenate((q_point, acceleration))
 
 def second_membre_amorti(t,y):
-    q=y[:10]
-    q_point=y[10:]
+    q=y[:N]
+    q_point=y[N:]
     acceleration_amorti = -2*xi*2*np.pi*frequencies*q_point - (2*np.pi*frequencies)**2*q
     return np.concatenate((q_point,acceleration_amorti))
 
@@ -222,8 +230,6 @@ U_seconde_avec = phi @ q_seconde_avec # Accélération avec amortissement
 # Calcul des forces au chevalet qui est àl'origine 
 force_sans = -(K @ U_sans + M @ U_seconde_sans)[0,:]
 force_avec = -(K @ U_avec + M @ U_seconde_avec)[0,:]
-
-
 from scipy.io import wavfile # Importation de la fonction d'écriture audio
 # Récupération de la force au chevalet avec amortissement
 signal = force_avec.copy()
@@ -234,8 +240,6 @@ signal = signal / np.max(np.abs(signal))#ramener les valeurs du signal entre -1 
 data = amplitude * signal #notre signal est compris entre -1 et 1, alors que le format entier 16 bits utilise des valeurs comprises entre -32768 et 32767.On met les valeurs du signal selon la nouvelle plage
 
 wavfile.write("pincement1.wav", fs, data.astype(np.int16))
-
-# Comparaison graphique des forces au chevalet
 plt.figure(figsize=(12, 7)) # Création de la figure
 
 # Graphique sur toute la durée
@@ -248,4 +252,17 @@ plt.legend()
 plt.grid()
 plt.show()
 
+
+f_max = 4000.0                                           
+
+def spectre(F, fs):  #fonction spectre qui prend en paramètres le signal dont on souhaite calculer le spectre et la fréquence d'échantillonage.                                     
+    w = np.hanning(len(F))  #Création d'une fenêtre de Hann                         
+    F_fenetre = (F - np.mean(F)) * w #on supprime la composante continue du signal puis on multiplie chaque valeur du signal recentré par la valeur correspondante de w
+    X = np.fft.rfft(F_fenetre)  #on applique la transformée de Fourier rapide                       
+    amplitude = 2 * np.abs(X)                 
+    f = np.fft.rfftfreq(len(F), d=1/fs)    #on construit le tableau de frequence associés à la transformée de Fourier               
+    return f, amplitude                                   
+
+f,A_sans=spectre(force_sans,fs)
+f,A_avec=spectre(force_avec,fs)
 
