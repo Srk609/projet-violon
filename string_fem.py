@@ -266,3 +266,4 @@ def spectre(F, fs):  #fonction spectre qui prend en paramètres le signal dont o
 f,A_sans=spectre(force_sans,fs)
 f,A_avec=spectre(force_avec,fs)
 
+dd
