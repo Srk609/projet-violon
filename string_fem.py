@@ -1,17 +1,20 @@
-import numpy as np
-import matplotlib.pyplot as plt   
-import scipy
 import time
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.linalg
+import scipy.integrate
 from scipy.io import wavfile
+from scipy import signal as sig  
+
 def mesh_1d(L, n_elem):
     """
     Entrées :
-    - L : longueur totale [m] (float)
-    - n_elem : nombre d'éléments (int)
+- L : longueur totale [m] (float)
+- n_elem : nombre d'éléments (int)
 
     Retour :
-    - nodes : coordonnées des nœuds (tableau 1D)
-    - connect : table de connectivité (tableau de taille (n_elem, 2))
+- nodes : coordonnées des nœuds (tableau 1D)
+- connect : table de connectivité (tableau de taille (n_elem, 2))
     """
     nodes = np.linspace(0.0, L, n_elem + 1) #crée un tableau qui va de 0 à la longueur L avec n_elements+1 
     n_nodes=len(nodes)
@@ -24,6 +27,7 @@ def string_elem_stiffness(h, T):# Matrice de la raideur élémentaire
         [ 1.0, -1.0],
         [-1.0,  1.0]
     ])
+
 def string_elem_mass(h, rho, S):#Matrice de la masse élémentaire
     return rho * S * h / 6 * np.array([[2.0, 1.0],
                                        [1.0, 2.0]])
@@ -53,15 +57,8 @@ def assemble(nodes, connect, matrice_elementaire, ndof_per_node=1, **params):
             for b in range(len(dofs)):
                 A[dofs[a], dofs[b]] += Ae[a, b] # Addition dans la matrice globale
     return A
-L, n_elem, T = 0.33, 11, 50.0
 
-nodes, connect = mesh_1d(L, n_elem)
 
-K = assemble(nodes, connect, string_elem_stiffness, T=T)
-
-plt.spy(K, marker="s", markersize=14)      # un carré par coefficient non nul
-plt.title(f"corde : {K.shape[0]} ddl, nnz = {np.count_nonzero(K)}")
-plt.show()
 def free_dofs(n_dof, fixed):
     """Liste des ddl libres : tous les ddl sauf ceux bloqués."""
     return np.setdiff1d(np.arange(n_dof), fixed)
@@ -90,10 +87,10 @@ def force_ponctuelle(nodes, x_load, F0, ndof_per_node=1):
     d'au plus h/2 (h = longueur d'un élément).
 
     Entrées :
-    - nodes : positions des noeuds
-    - x_load : position de la force [m]
-    - F0 : intensité de la force [N]
-    - ndof_per_node : nombre de ddl par noeud
+- nodes : positions des noeuds
+- x_load : position de la force [m]
+- F0 : intensité de la force [N]
+- ndof_per_node : nombre de ddl par noeud
 
     Sortie : vecteur F de taille n_dof, nul sauf au noeud chargé
     """
@@ -108,13 +105,14 @@ def force_ponctuelle(nodes, x_load, F0, ndof_per_node=1):
     F[i * ndof_per_node] = F0     # toute la force sur le noeud i
     return F
 
+
 def u_exact(x, F0, T, L, x_bow):
     x = np.asarray(x)
     return F0 / (T * L) * np.where(x <= x_bow,
                                    x * (L - x_bow),
                                    x_bow * (L - x))
 
-from scipy import linalg
+
 def build_string(L, rhoS, T, n_elem):
     """Construit le maillage et assemble les matrices globales K et M."""
     nodes, connect = mesh_1d(L, n_elem)
@@ -126,10 +124,12 @@ def build_string(L, rhoS, T, n_elem):
     fixed = [0, n_dof - 1] # Extrémités encastrées
     free = free_dofs(n_dof, fixed)# permet d'identifier les noeuds qui ont le droit de bouger(les noeuds intérieurs),en retirant les noeuds bloqués de la liste.
     return nodes, K, M, free
+
+
 def solve_modal(K, M, free, n_modes=10):
     K_free = reduire_matrice(K, free)#permet d'éliminer les lignes et colonnes correspondant aux extrémités bloquées
     M_free = reduire_matrice(M, free)
-    omega2, phi_free = linalg.eigh(K_free, M_free, subset_by_index=(0, n_modes - 1)) # Permet d'obtenir les n_modes premiers modes
+    omega2, phi_free = scipy.linalg.eigh(K_free, M_free, subset_by_index=(0, n_modes - 1)) # Permet d'obtenir les n_modes premiers modes
     omega = np.sqrt(omega2)
     frequencies = omega / (2 * np.pi)
     n_dof = K.shape[0]
@@ -138,132 +138,391 @@ def solve_modal(K, M, free, n_modes=10):
         phi[:, i] = etendre_vecteur(phi_free[:, i], free, n_dof)# on extrait la ième colonne qui correspond au ième vecteur propre réduit d'un mode,puis on lui rajoute des zéros aux extrémités bloquées puis on injecte ce vecteur complet dans la matrice phi
         
     return frequencies, phi
-L = 0.33            # longueur [m]
-x_bow = 0.03        # position de l'archet [m]
-rhoS = 3.1e-3       # masse linéique [kg/m]
-f1 = 196.0          # fréquence fondamentale [Hz]
-T = rhoS * (2 * L * f1) ** 2     # tension déduite [N]
-n_elem = 330        # Maillage raffiné pour capturer proprement les 10 modes
+# Calcul des spectres
 
+# Spectre de la force au chevalet (avec et sans amortissement)
+
+f_max = 4000.0                                            # fréquence maximale à tracer [Hz] (demandée par l'énoncé)
+
+def spectre(F, fs):                                       # calcule le spectre d'amplitude d'un signal F échantillonné à fs
+    w = np.hanning(len(F))                                # fenêtre de Hann : courbe en cloche qui vaut 0 aux bords et 1 au milieu
+    F_fenetre = (F - np.mean(F)) * w                      # on retire la valeur moyenne (pic parasite à 0 Hz) puis on multiplie par la fenêtre (limite la fuite spectrale)
+    X = np.fft.rfft(F_fenetre)                            # FFT pour un signal réel : coefficients complexes pour les fréquences de 0 à fs/2
+    amplitude = 2 * np.abs(X) / np.sum(w)                 # module = amplitude ; x2 pour les fréquences négatives ignorées ; /sum(w) corrige l'effet de la fenêtre -> amplitude en N
+    f = np.fft.rfftfreq(len(F), d=1/fs)                   # fréquence associée à chaque case de X : 0, df, 2df, ... jusqu'à fs/2
+    return f, amplitude                                   # on renvoie l'axe des fréquences et l'amplitude
+
+
+# 1. Motif de la matrice de raideur globale K
+L, x_bow, rho_S, f1, F0 = 0.33, 0.03, 3.1e-3, 196.0, 1.0  # paramètres physiques de la corde
+T = rho_S * (2 * L * f1) ** 2  # tension déduite de la corde [N]
+n_elem = 11  # maillage grossier à 11 éléments
+
+nodes, connect = mesh_1d(L, n_elem)  # création des nœuds et de la connectivité
+K = assemble(nodes, connect, string_elem_stiffness, T=T)  # assemblage de la matrice de raideur
+
+plt.figure()
+plt.spy(K, marker="s", markersize=14)  # affichage des termes non nuls de K
+plt.title(f"corde : {K.shape[0]} ddl, nnz = {np.count_nonzero(K)}")  # titre avec ddl et nnz
+plt.show()
+
+# 2. Déformée statique : comparaison éléments finis / solution exacte
+n_dof = len(nodes)  # nombre total de degrés de liberté
+free = free_dofs(n_dof, [0, n_dof - 1])  # ddl libres (extrémités encastrées bloquées)
+
+F = force_ponctuelle(nodes, x_bow, F0)  # vecteur force ponctuelle en x_bow
+K_red = reduire_matrice(K, free)  # réduction de K aux ddl libres
+U_free = np.linalg.solve(K_red, F[free])  # résolution du système statique
+U = etendre_vecteur(U_free, free, n_dof)  # reconstruction sur tous les nœuds
+
+x_fin = np.linspace(0, L, 500)  
+u_ex = u_exact(x_fin, F0, T, L, x_bow)  # solution analytique exacte
+
+plt.figure()
+plt.plot(x_fin, u_ex * 1e3, "k", label="exact")  # tracé exact en mm
+plt.plot(nodes, U * 1e3, "o--", label=f"EF, {n_elem} éléments")  # tracé éléments finis en mm
+plt.xlabel("x [m]")  # abscisse en mètres
+plt.ylabel("u [mm]")  # déplacement en millimètres
+plt.title(f"Déformée statique sous F = {F0} N en x = {x_bow} m (T = {T:.1f} N)")  # titre de la figure
+plt.legend()
+plt.show()
+
+# 3. Premières déformées modales de la corde
+n_elem_mod = 330  # maillage raffiné pour capturer les modes
+n_modes = 10  # nombre de modes propres à tracer
+
+nodes_mod, K_mod, M_mod, free_mod = build_string(L, rho_S, T, n_elem_mod)  # construction K et M
+frequencies, phi = solve_modal(K_mod, M_mod, free_mod, n_modes=n_modes)  # fréquences et modes
+
+plt.figure(figsize=(10, 6))
+for m in range(n_modes):
+    plt.plot(nodes_mod, phi[:, m], label=f"mode {m + 1} : {frequencies[m]:.1f} Hz")  # déformée du mode m+1
+
+plt.axvline(x_bow, color="k", linestyle=":", label="archet")  # repère vertical de la position d'archet
+plt.xlabel("Position sur la corde [m]")  # axe des positions
+plt.ylabel("Déformée modale (normée)")  # axe des déformées modales
+plt.title("Premières déformées modales de la corde")  # titre de la figure
+plt.legend(loc="upper right")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+
+# Paramètres physiques et géométriques
+L = 0.33               # longueur [m]
+x_bow = 0.03           # position de l'archet [m]
+rhoS = 3.1e-3          # masse linéique [kg/m]
+f1 = 196.0             # fréquence fondamentale [Hz]
+T = rhoS * (2 * L * f1) ** 2  # tension déduite [N]
+
+# Paramètres numériques
+n_elem = 110
+x_pluck = 0.03
+u_pluck = 1e-3
+duree = 0.2
+fs = 44100
+xi = 0.001             # taux d'amortissement modal (0.1 %)
+N = 25                 # nombre de modes conservés
+f_max = 4000.0         # fréquence maximale d'intérêt [Hz]
+
+t_span = (0.0, duree)
+t_eval_complet = np.linspace(0, duree, int(duree * fs) + 1)
+t_eval_modal = np.linspace(t_span[0], t_span[1], 1000)
+
+# Construction du maillage et des matrices
 nodes, K, M, free = build_string(L, rhoS, T, n_elem)
-
-
-n_modes = 4
-frequencies, phi = solve_modal(K, M, free, n_modes=n_modes)
-
-n_elem = 330
-x_pluck = L/5          # Position du pincement [m]
-u_pluck = 1e-3          # Déplacement au point de pincement [m]
-duree = 1.0             # Durée simulée [s]
-fs=44100                #Fréquence [Hz]
-nodes, K, M, free = build_string(L, rhoS, T, n_elem)
-t_span=(0.0,duree)
-t_eval = np.arange(0, duree, 1/fs)
-
 
 K_libre = reduire_matrice(K, free)
 M_libre = reduire_matrice(M, free)
 
 n_libres = len(free)
-# Condition initiale
-F0 = u_pluck * T * L / (x_pluck * (L - x_pluck))
-U0 = u_exact(nodes, F0, T, L, x_pluck)[free]
-xi = 0.001
 
-N=25
-frequencies,phi=solve_modal(K,M,free,n_modes=N)
+# Conditions initiales
+U0_initial = u_exact(nodes, 1.0, T, L, x_pluck)
+U0 = U0_initial[free]
+
+V0 = np.zeros(n_libres)
+Y0 = np.concatenate((U0, V0))
+
+# Factorisation de la matrice de masse
+facteur_M = scipy.linalg.cho_factor(M_libre)
+
+# Second membre du système
+def second_membre(t, Y):
+    U = Y[:n_libres]
+    V = Y[n_libres:]
+    acceleration = scipy.linalg.cho_solve(
+        facteur_M, -K_libre @ U
+    )
+    return np.concatenate((V, acceleration))
+
+# Début du chronométrage
+debut = time.perf_counter()
+
+# Résolution temporelle avec RK45
+solution = scipy.integrate.solve_ivp(
+    second_membre,
+    t_span,
+    Y0,
+    method="RK45",
+    t_eval=t_eval_complet,
+    rtol=1e-3,
+    atol=1e-6
+)
+# Fin du chronométrage
+fin = time.perf_counter()
+
+temps_calcul = fin - debut
+
+print(f"Temps de calcul RK45 : {temps_calcul:.6f} secondes")
+
+# Reconstruction du déplacement sur tous les nœuds
+U_libre_t = solution.y[:n_libres, :]
+
+U_t = np.zeros((len(nodes), len(solution.t)))
+U_t[free, :] = U_libre_t
+
+# Affichage du déplacement au nœud choisi
+i = 10
+
+plt.figure()
+plt.plot(solution.t * 1e3, U_t[i] * 1e3)
+plt.xlabel("Temps [ms]")
+plt.ylabel("Déplacement [mm]")
+plt.title("Déplacement en x = 30 mm")
+plt.grid()
+plt.show()
+
+# Début du chronométrage
+debut = time.perf_counter()
+
+# Calcul des modes propres
+frequencies, phi = solve_modal(K, M, free, n_modes=N)
+
 phi_libre = phi[free, :]
-q0=phi_libre.T@(M_libre@U0)
-q_point0=np.zeros(N)
+
+# Projection des conditions initiales dans la base modale
+q0 = phi_libre.T @ (M_libre @ U0)
+
+q_point0 = np.zeros(N)
+
 Y0_modal = np.concatenate((q0, q_point0))
 
-def second_membre_non_amorti(t,y):
+
+# Second membre du système modal
+def second_membre_modal(t, y):
     q = y[:N]
     q_point = y[N:]
-    acceleration = -(2*np.pi*frequencies)**2 * q
+
+    acceleration_modal = -(2 * np.pi * frequencies)**2 * q
+
+    return np.concatenate((q_point, acceleration_modal))
+
+
+# Résolution temporelle
+solution_modal = scipy.integrate.solve_ivp(
+    second_membre_modal,
+    t_span,
+    Y0_modal,
+    method="DOP853",
+    t_eval=t_eval_modal,
+    rtol=1e-6,
+    atol=1e-9
+)
+
+# Fin du chronométrage
+fin = time.perf_counter()
+
+temps_calcul = fin - debut
+
+print(f"Temps de calcul modal : {temps_calcul:.6f} secondes")
+
+# Reconstruction du déplacement
+q_t = solution_modal.y[:N, :]
+
+U_modal = phi @ q_t
+
+# Visualisation de la corde à différents instants
+T1 = 1 / f1
+
+fig, ax = plt.subplots()
+
+for idx in [0,int(0.125 * T1 * fs), int(0.25 * T1 * fs),int(0.375 * T1 * fs),int(0.5 * T1 * fs)]:
+    ax.plot(nodes,
+        U_modal[:, idx],
+        label=f"t = {solution_modal.t[idx]:.5f} s"
+    )
+
+ax.set_xlabel("Position x (m)")
+ax.set_ylabel("Déplacement u_modal(x,t) (m)")
+ax.set_title("Évolution de la corde en fonction de x pour différents instants")
+ax.legend()
+ax.grid()
+
+plt.show()
+
+# Construction EF et base modale
+x_pluck = L / 5
+duree_sim = 1.0
+t_eval = np.arange(0, duree_sim, 1 / fs)
+
+# Condition initiale modale
+F0 = u_pluck * T * L / (x_pluck * (L - x_pluck))
+U0_sim = u_exact(nodes, F0, T, L, x_pluck)[free]
+
+q0_sim = phi_libre.T @ (M_libre @ U0_sim)
+Y0_sim = np.concatenate((q0_sim, np.zeros(N)))
+
+omega = 2 * np.pi * frequencies
+
+
+def second_membre_non_amorti(t, y):
+    q = y[:N]
+    q_point = y[N:]
+    acceleration = -(omega ** 2) * q
     return np.concatenate((q_point, acceleration))
 
-def second_membre_amorti(t,y):
-    q=y[:N]
-    q_point=y[N:]
-    acceleration_amorti = -2*xi*2*np.pi*frequencies*q_point - (2*np.pi*frequencies)**2*q
-    return np.concatenate((q_point,acceleration_amorti))
 
-solution_amortie = scipy.integrate.solve_ivp(
-    second_membre_amorti,
-    (0, duree),
-    Y0_modal,
+def second_membre_amorti(t, y):
+    q = y[:N]
+    q_point = y[N:]
+    acceleration_amorti = -2 * xi * omega * q_point - (omega ** 2) * q
+    return np.concatenate((q_point, acceleration_amorti))
+
+
+# Intégration temporelle
+solution_non_amortie = scipy.integrate.solve_ivp(
+    second_membre_non_amorti,
+    (0.0, duree_sim),
+    Y0_sim,
     method="DOP853",
     t_eval=t_eval,
     rtol=1e-6,
-    atol=1e-9)
+    atol=1e-9,
+)
 
-solution_non_amortie=scipy.integrate.solve_ivp(
-    second_membre_non_amorti,                  
-    (0, duree),                                         
-    Y0_modal,                                           
-    method="DOP853",                                    
-    t_eval=t_eval,                                      
-    rtol=1e-6,                                          
-    atol=1e-9)
+solution_amortie = scipy.integrate.solve_ivp(
+    second_membre_amorti,
+    (0.0, duree_sim),
+    Y0_sim,
+    method="DOP853",
+    t_eval=t_eval,
+    rtol=1e-6,
+    atol=1e-9,
+)
 
-# Récupération des déplacements 
-q_sans_amortissement = solution_non_amortie.y[:N, :]
-q_avec_amortissement = solution_amortie.y[:N, :]
+# Récupération des coordonnées modales
+q_sans = solution_non_amortie.y[:N, :]
+q_avec = solution_amortie.y[:N, :]
+q_point_sans = solution_non_amortie.y[N:, :]
+q_point_avec = solution_amortie.y[N:, :]
 
-# Récupération des vitesses 
-q_point_sans_amortissement = solution_non_amortie.y[N:, :]
-q_point_avec_amortissement = solution_amortie.y[N:, :] 
+omega_col = omega.reshape(N, 1)
+q_seconde_sans = -(omega_col ** 2) * q_sans
+q_seconde_avec = -2 * xi * omega_col * q_point_avec - (omega_col ** 2) * q_avec
 
-# Calcul des accélérations 
-q_seconde_sans = -(2*np.pi*frequencies.reshape(N, 1))**2 * q_sans_amortissement # on utilise reshape(N,1) pour transformer le tableau de fréquences en un tableau de dimension(N,1) pour ensuite utiliser le broadcasting pour réaliser la multiplication
-q_seconde_avec = (-2*xi*2*np.pi*frequencies.reshape(N, 1)*q_point_avec_amortissement 
-               -(2*np.pi*frequencies.reshape(N, 1))**2*q_avec_amortissement)       
-# Reconstruction des déplacements 
-U_sans = phi @ q_sans_amortissement   # Déplacement sans amortissement
-U_avec = phi @ q_avec_amortissement   # Déplacement avec amortissement
+# Reconstruction physique et force au chevalet (nœud 0)
+U_sans = phi @ q_sans
+U_avec = phi @ q_avec
+U_seconde_sans = phi @ q_seconde_sans
+U_seconde_avec = phi @ q_seconde_avec
 
-# Reconstruction des accélérations physiques
-U_seconde_sans = phi @ q_seconde_sans # Accélération sans amortissement
-U_seconde_avec = phi @ q_seconde_avec # Accélération avec amortissement
+force_sans = -(K @ U_sans + M @ U_seconde_sans)[0, :]
+force_avec = -(K @ U_avec + M @ U_seconde_avec)[0, :]
 
-# Calcul des forces au chevalet qui est àl'origine 
-force_sans = -(K @ U_sans + M @ U_seconde_sans)[0,:]
-force_avec = -(K @ U_avec + M @ U_seconde_avec)[0,:]
-from scipy.io import wavfile # Importation de la fonction d'écriture audio
-# Récupération de la force au chevalet avec amortissement
-signal = force_avec.copy()
-
-# Normalisation du signal
-amplitude = np.iinfo(np.int16).max #récupérer la valeur maximale que peut contenir un entier signé codé sur 16 bits.
-signal = signal / np.max(np.abs(signal))#ramener les valeurs du signal entre -1 et 1.
-data = amplitude * signal #notre signal est compris entre -1 et 1, alors que le format entier 16 bits utilise des valeurs comprises entre -32768 et 32767.On met les valeurs du signal selon la nouvelle plage
-
+# Export audio (.wav)
+signal = force_avec / np.max(np.abs(force_avec))
+data = np.iinfo(np.int16).max * signal
 wavfile.write("pincement1.wav", fs, data.astype(np.int16))
-plt.figure(figsize=(12, 7)) # Création de la figure
 
-# Graphique sur toute la durée
-plt.subplot(2, 2, (1, 2))
+# Figure 1 : signal complet
+plt.figure(figsize=(10, 4))
 plt.plot(t_eval, force_sans, label="sans amortissement")
 plt.plot(t_eval, force_avec, label="xi = 0.1% pour tous les modes")
 plt.xlabel("t [s]")
 plt.ylabel("Force au chevalet [N]")
 plt.legend()
 plt.grid()
+plt.tight_layout()
 plt.show()
 
+# Figure 2 : zoom sur les premiers instants
+masque_debut = t_eval <= 0.015
+plt.figure(figsize=(8, 4))
+plt.plot(t_eval[masque_debut], force_sans[masque_debut], color="lightgray", label="sans amortissement")
+plt.plot(t_eval[masque_debut], force_avec[masque_debut], color="C1", label="avec amortissement")
+plt.title("premiers instants")
+plt.xlabel("t [s]")
+plt.ylabel("force au chevalet [N]")
+plt.grid()
+plt.tight_layout()
+plt.show()
 
-f_max = 4000.0                                           
+# Figure 3 : zoom sur les derniers instants
+masque_fin = t_eval >= (duree_sim - 0.015)
+plt.figure(figsize=(8, 4))
+plt.plot(t_eval[masque_fin], force_sans[masque_fin], color="lightgray", label="sans amortissement")
+plt.plot(t_eval[masque_fin], force_avec[masque_fin], color="C1", label="avec amortissement")
+plt.title("derniers instants")
+plt.xlabel("t [s]")
+plt.ylabel("force au chevalet [N]")
+plt.grid()
+plt.tight_layout()
+plt.show()
 
-def spectre(F, fs):  #fonction spectre qui prend en paramètres le signal dont on souhaite calculer le spectre et la fréquence d'échantillonage.                                     
-    w = np.hanning(len(F))  #Création d'une fenêtre de Hann                         
-    F_fenetre = (F - np.mean(F)) * w #on supprime la composante continue du signal puis on multiplie chaque valeur du signal recentré par la valeur correspondante de w
-    X = np.fft.rfft(F_fenetre)  #on applique la transformée de Fourier rapide                       
-    amplitude = 2 * np.abs(X)                 
-    f = np.fft.rfftfreq(len(F), d=1/fs)    #on construit le tableau de frequence associés à la transformée de Fourier               
-    return f, amplitude                                   
+# Calcul des spectres
+f, A_sans = spectre(force_sans, fs)                       # spectre de la force au chevalet sans amortissement
+f, A_avec = spectre(force_avec, fs)                       # spectre de la force au chevalet avec amortissement (même axe f car même nombre de points)
 
-f,A_sans=spectre(force_sans,fs)
-f,A_avec=spectre(force_avec,fs)
+A_ref = np.max(A_sans)                                    # amplitude de référence : le plus grand pic sans amortissement (il sera à 0 dB)
+dB_sans = 20 * np.log10(A_sans / A_ref + 1e-12)           # passage en décibels : 20*log10 car c'est une amplitude ; +1e-12 évite log10(0)
+dB_avec = 20 * np.log10(A_avec / A_ref + 1e-12)           # même chose avec amortissement, même référence pour pouvoir comparer
 
-dd
+df = f[1] - f[0]                                          # résolution fréquentielle = écart entre deux cases = 1/durée
+print("Résolution fréquentielle df =", df, "Hz")          # 1 Hz pour une durée de 1 s
+print("Fréquence maximale représentée =", f[-1], "Hz")    # fréquence de Nyquist fs/2 = 22050 Hz
+
+fig, ax = plt.subplots(figsize=(10, 4))                   # figure large avec un seul graphique
+for n in range(1, int(f_max / f1) + 1):                   # boucle sur les harmoniques n = 1, 2, ... tant que n*f1 <= 4000 Hz
+    ax.axvline(n * f1, color="grey", linestyle=":", linewidth=0.8)   # trait vertical en pointillés à la fréquence n*f1
+ax.plot(f, dB_sans, linewidth=0.8, label="sans amortissement")       # spectre sans amortissement
+ax.plot(f, dB_avec, linewidth=0.8, label="avec amortissement")       # spectre avec amortissement
+ax.set_xlim(0, f_max)                                     # on n'affiche que de 0 à 4 kHz
+ax.set_ylim(-100, 5)                                      # axe vertical entre -100 dB et +5 dB
+ax.set_xlabel("fréquence [Hz]")                           # titre de l'axe horizontal
+ax.set_ylabel("amplitude [dB]")                           # titre de l'axe vertical
+ax.set_title(r"spectre de la force au chevalet (pointillés : $nf_1$)")   # titre ($nf_1$ écrit en LaTeX)
+ax.legend()                                               # légende
+plt.tight_layout()                                        # ajuste les marges pour que rien ne soit coupé
+plt.show()                                                # affiche la figure
+
+# Spectrogramme de la force au chevalet amortie
+
+n_fenetre = 4096                                          # nombre de points de chaque tranche (puissance de 2 : FFT rapide)
+duree_fenetre = n_fenetre / fs                            # durée d'une tranche en secondes : 4096 / 44100 = 93 ms
+n_recouvrement = 3 * n_fenetre // 4                       # deux tranches successives se recouvrent de 75 % (la fenêtre avance de 1024 points = 23 ms)
+
+f_spec, t_spec, Sxx = sig.spectrogram(                    # calcul du spectrogramme (transformée de Fourier à court terme) :
+    force_avec,                                           #   signal analysé : force au chevalet avec amortissement
+    fs=fs,                                                #   fréquence d'échantillonnage [Hz] pour graduer l'axe des fréquences
+    window="hann",                                        #   chaque tranche est pondérée par une fenêtre de Hann (limite la fuite spectrale)
+    nperseg=n_fenetre,                                    #   longueur de chaque tranche
+    noverlap=n_recouvrement,                              #   nombre de points communs entre deux tranches voisines
+    detrend=False,                                        #   on ne retire rien au signal dans chaque tranche
+    mode="magnitude")                                     #   on veut l'amplitude |X| (et non la puissance |X|^2)
+# f_spec : fréquences (lignes), t_spec : instants au centre de chaque tranche (colonnes), Sxx : amplitude pour chaque (f, t)
+
+Sxx_dB = 20 * np.log10(Sxx / np.max(Sxx) + 1e-12)         # passage en dB, 0 dB = point le plus intense ; +1e-12 évite log10(0)
+
+fig, ax = plt.subplots(figsize=(10, 4))                   # création d'une figure large avec un seul graphique
+carte = ax.pcolormesh(t_spec, f_spec, Sxx_dB,             # carte temps-fréquence : la couleur de chaque case donne l'amplitude en dB
+                      cmap="magma",                       #   palette de couleurs (noir = faible, jaune clair = fort)
+                      vmin=-80, vmax=0,                   #   échelle des couleurs de -80 dB à 0 dB (en dessous de -80 dB : noir)
+                      shading="auto")                     #   placement automatique des cases autour des points (t, f)
+ax.set_ylim(0, 4000)                                      # on n'affiche que les fréquences de 0 à 4 kHz
+ax.set_xlabel("t [s]")                                    # titre de l'axe horizontal
+ax.set_ylabel("fréquence [Hz]")                           # titre de l'axe vertical
+ax.set_title(f"spectrogramme de la force au chevalet (amortie), fenêtre de {duree_fenetre*1e3:.0f} ms")   # titre avec la durée de la fenêtre en ms
+fig.colorbar(carte, ax=ax, label="amplitude [dB]")        # barre de couleurs à droite pour lire les dB
+plt.tight_layout()                                        # ajuste les marges pour que rien ne soit coupé
+plt.show()                                                # affiche la figure
