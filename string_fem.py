@@ -525,4 +525,49 @@ ax.set_ylabel("fréquence [Hz]")                           # titre de l'axe vert
 ax.set_title(f"spectrogramme de la force au chevalet (amortie), fenêtre de {duree_fenetre*1e3:.0f} ms")   # titre avec la durée de la fenêtre en ms
 fig.colorbar(carte, ax=ax, label="amplitude [dB]")        # barre de couleurs à droite pour lire les dB
 plt.tight_layout()                                        # ajuste les marges pour que rien ne soit coupé
-plt.show()                                                # affiche la figure
+plt.show()  
+
+# =============================================================
+# Données de l'étape 3 (Table 3)
+# =============================================================
+MU_S = 0.4        # coefficient de frottement statique (corde qui colle à l'archet)
+MU_D = 0.2        # coefficient de frottement dynamique (corde qui glisse vite)
+C = 5.0           # décroissance de l'effet Stribeck [s/m] : vitesse du passage de mu_s à mu_d
+V_LIM = 1e-3      # vitesse de régularisation [m/s] : largeur de la transition autour de v = 0
+
+
+# =============================================================
+# Définitions
+# =============================================================
+def mu_stribeck(v, mu_s=MU_S, mu_d=MU_D, C=C):
+    """Loi de Coulomb avec effet Stribeck, NON régularisée (discontinue en v = 0)."""
+    return np.sign(v) * (mu_d + (mu_s - mu_d) * np.exp(-C * np.abs(v)))   # sign(v) donne le sens, le crochet l'intensité
+
+
+def mu(v, v_lim=V_LIM, mu_s=MU_S, mu_d=MU_D, C=C):
+    """Loi régularisée (équation 22) : sign(v) est remplacé par tanh(v / v_lim), continue et très raide."""
+    return np.tanh(v / v_lim) * (mu_d + (mu_s - mu_d) * np.exp(-C * np.abs(v)))   # tanh vaut ±1 dès que |v| >> v_lim
+
+
+def force_frottement(v_corde, V_archet, F_archet, v_lim=V_LIM):
+    """Force de l'archet sur la corde (équation 21) : F = -F_b mu(v_b - V_b)."""
+    v_glissement = v_corde - V_archet                     # vitesse relative corde/archet (0 pendant l'adhérence)
+    return -F_archet * mu(v_glissement, v_lim)            # le signe - : le frottement s'oppose au glissement
+v = np.linspace(-0.6, 0.6, 20001)                     # vitesses de glissement sur toute la plage [m/s]v_zoom = np.linspace(-0.01, 0.01, 4001)               # zoom autour de v = 0 pour voir la régularisation
+v_zoom = np.linspace(-0.01, 0.01, 4001)               # zoom autour de v = 0 pour voir la régularisation    
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4)) # deux graphiques côte à côte
+ax1.plot(v, mu_stribeck(v), color="lightgrey", lw=3, label="non régularisée")   # loi exacte en gris épais
+for v_lim in [1e-2, 1e-3, 1e-4]:                      # les trois valeurs demandées par l'énoncé
+        ax1.plot(v, mu(v, v_lim), label=f"v_lim = {v_lim:g} m/s")            # vue d'ensemble
+        ax2.plot(v_zoom, mu(v_zoom, v_lim), label=f"v_lim = {v_lim:g} m/s")  # zoom sur la transition
+
+ax1.set_title("vue d'ensemble")
+ax2.set_title("zoom autour de v = 0")
+for ax in (ax1, ax2):                                 # même mise en forme pour les deux graphiques
+        ax.set_xlabel("vitesse de glissement v = v_b - V_b [m/s]")
+        ax.set_ylabel("μ")
+        ax.grid()
+        ax.legend()
+plt.tight_layout()
+plt.show()
