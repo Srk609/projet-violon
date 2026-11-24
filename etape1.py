@@ -1,63 +1,86 @@
-import numpy as np
-import matplotlib.pyplot as plt   
-import scipy
-import time
-from string_fem import mesh_1d,string_elem_stiffness,string_elem_mass_lumped,string_elem_mass,reduire_matrice,etendre_vecteur,force_ponctuelle,assemble,free_dofs,u_exact,build_string,solve_modal
 
+import time
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.linalg
+import scipy.integrate
 
-# Données
-L, x_bow, rhoS, f1, F0 = 0.33, 0.03, 3.1e-3, 196, 1.0
-T = rhoS * (2 * L * f1)**2          # ≈ 51.9 N
-n_elem = 11
+from string_fem import build_string, reduire_matrice, u_exact
 
-# Maillage et raideur
-nodes, connect = mesh_1d(L, n_elem)
-K = assemble(nodes, connect, string_elem_stiffness, T=T)
-n_dof = len(nodes)
+L = 0.33
+x_bow = 0.03
+rhoS = 3.1e-3
+f1 = 196.0
+T = rhoS * (2 * L * f1) ** 2
 
-# Conditions aux limites : u = 0 en x = 0 et x = L
-fixed = [0, n_dof - 1]
-free = free_dofs(n_dof, fixed)
-
-# Force et résolution sur les ddl libres
-F = force_ponctuelle(nodes, x_bow, F0)
-K_red = reduire_matrice(K, free)
-U_free = np.linalg.solve(K_red, F[free])
-U = etendre_vecteur(U_free, free, n_dof)
-
-# Solution exacte sur une grille fine
-x_fin = np.linspace(0, L, 500)
-u_ex = u_exact(x_fin, F0, T, L, x_bow)
-
-# Figure : superposition exact / EF
-plt.plot(x_fin, u_ex * 1e3, "k", label="exact")
-plt.plot(nodes, U * 1e3, "o--", label=f"EF, {n_elem} éléments")
-plt.xlabel("x [m]")
-plt.ylabel("u [mm]")
-plt.title(f"Déformée statique sous F = {F0} N en x = {x_bow} m (T = {T:.1f} N)")
-plt.legend()
-plt.show()
-
-n_elem = 330        # Maillage raffiné pour capturer proprement les 10 modes
+n_elem = 110
+x_pluck = 0.03
+u_pluck = 1e-3
+duree = 0.2
+fs = 44100
 
 nodes, K, M, free = build_string(L, rhoS, T, n_elem)
 
-n_modes = 10
-frequencies, phi = solve_modal(K, M, free, n_modes=n_modes)
+t_span = (0.0, duree)
+t_eval = np.linspace(0, duree, int(duree * fs) + 1)
 
-plt.figure(figsize=(10, 6))
+K_libre = reduire_matrice(K, free)
+M_libre = reduire_matrice(M, free)
 
-for n in range(n_modes):
-    plt.plot(nodes, phi[:, n], label=f"mode {n+1} : {frequencies[n]:.1f} Hz")
+n_libres = len(free)
 
-# Ajout de la ligne verticale pour la position de l'archet
-plt.axvline(x=x_bow, color='gray', linestyle=':', label='archet')
+# Conditions initiales
+U0_initial = u_exact(nodes, 1.0, T, L, x_pluck)
+U0 = U0_initial[free]
 
-plt.xlabel("Position sur la corde [m]")
-plt.ylabel("Déformée modale (normée)")
-plt.title("Premières déformées modales de la corde")
-plt.legend(loc='upper right')
-plt.grid(True, linestyle=':', alpha=0.7)
+V0 = np.zeros(n_libres)
+Y0 = np.concatenate((U0, V0))
+
+# Factorisation de la matrice de masse
+facteur_M = scipy.linalg.cho_factor(M_libre)
+
+# Second membre du système
+def second_membre(t, Y):
+    U = Y[:n_libres]
+    V = Y[n_libres:]
+    acceleration = scipy.linalg.cho_solve(
+        facteur_M, -K_libre @ U
+    )
+    return np.concatenate((V, acceleration))
+
+# Début du chronométrage
+debut = time.perf_counter()
+
+# Résolution temporelle avec RK45
+solution = scipy.integrate.solve_ivp(
+    second_membre,
+    t_span,
+    Y0,
+    method="RK45",
+    t_eval=t_eval,
+    rtol=1e-3,
+    atol=1e-6
+)
+
+# Fin du chronométrage
+fin = time.perf_counter()
+
+temps_calcul = fin - debut
+
+print(f"Temps de calcul RK45 : {temps_calcul:.6f} secondes")
+
+# Reconstruction du déplacement sur tous les nœuds
+U_libre_t = solution.y[:n_libres, :]
+
+U_t = np.zeros((len(nodes), len(solution.t)))
+U_t[free, :] = U_libre_t
+
+# Affichage du déplacement au nœud choisi
+i = 10
+
+plt.plot(solution.t * 1e3, U_t[i] * 1e3)
+plt.xlabel("Temps [ms]")
+plt.ylabel("Déplacement [mm]")
+plt.title("Déplacement en x = 30 mm")
+plt.grid()
 plt.show()
